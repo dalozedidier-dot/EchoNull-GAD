@@ -74,6 +74,25 @@ except Exception:  # pragma: no cover
     memory_profiler = None
 
 
+# Torch optional: define the autoencoder class only if torch is available
+def _make_denoising_autoencoder():
+    if nn is None:
+        return None
+
+    class DenoisingAutoencoder(nn.Module):  # type: ignore[misc]
+        def __init__(self, input_size: int = 50):
+            super().__init__()
+            self.encoder = nn.Sequential(nn.Linear(input_size, 32), nn.ReLU(), nn.Linear(32, 16))
+            self.decoder = nn.Sequential(nn.Linear(16, 32), nn.ReLU(), nn.Linear(32, input_size))
+
+        def forward(self, x):
+            return self.decoder(self.encoder(x))
+
+    return DenoisingAutoencoder
+
+
+_DENOISING_AUTOENCODER = _make_denoising_autoencoder()
+
 logger = logging.getLogger("EchoNull")
 logger.setLevel(logging.INFO)
 
@@ -243,8 +262,7 @@ class RiftLensAnalyzer(AnalyzerProtocol):
 
 
 class NullTraceAnalyzer(AnalyzerProtocol):
-    class DenoisingAutoencoder(nn.Module):  # type: ignore[misc]
-        def __init__(self, input_size: int = 50):
+    def __init__(self, input_size: int = 50):
             super().__init__()
             self.encoder = nn.Sequential(nn.Linear(input_size, 32), nn.ReLU(), nn.Linear(32, 16))
             self.decoder = nn.Sequential(nn.Linear(16, 32), nn.ReLU(), nn.Linear(32, input_size))
@@ -259,9 +277,9 @@ class NullTraceAnalyzer(AnalyzerProtocol):
         self.criterion = None
 
         if self.use_ml:
-            if torch is None or nn is None:
+            if torch is None or nn is None or _DENOISING_AUTOENCODER is None:
                 raise RuntimeError("torch n'est pas installé.")
-            self.model = self.DenoisingAutoencoder()
+            self.model = _DENOISING_AUTOENCODER()  # type: ignore[operator]
             self.optimizer = torch.optim.Adam(self.model.parameters(), lr=0.01)
             self.criterion = nn.MSELoss()
 
