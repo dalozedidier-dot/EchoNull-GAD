@@ -1,0 +1,53 @@
+name: EchoNull-GAD Scaling Test
+
+on:
+  workflow_dispatch:
+    inputs:
+      runs:
+        description: 'Nombre de runs à tester (ex: 50 ou 100)'
+        required: true
+        default: '50'
+      mode:
+        description: 'Mode à exécuter (sweep ou gad)'
+        required: false
+        default: 'sweep'
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run EchoNull
+        run: |
+          python echonull.py ${{ inputs.mode }} \
+            --runs ${{ inputs.runs }} \
+            --thresholds 0.25,0.5,0.7,0.8 \
+            --seed-base 1000 \
+            --workers 8 \
+            --enable-viz || echo "Execution completed with exit code $?"
+
+      - name: Upload all results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: echonull-results-${{ inputs.runs }}-runs-${{ inputs.mode }}
+          path: |
+            _echonull_out/
+            echonull.log
+            manifest.json
+            *.png
+            *.json
+            *.csv
+          retention-days: 7
