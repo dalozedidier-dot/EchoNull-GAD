@@ -1,0 +1,12 @@
+PATCH v7
+Fix: IndentationError in echonull.py during pytest collection after patch v6.
+
+Root cause:
+- The previous patch accidentally injected part of the autoencoder class body directly inside NullTraceAnalyzer with broken indentation.
+
+Change:
+- Rebuild NullTraceAnalyzer cleanly.
+- Define DenoisingAutoencoder at module level only when torch is available (no import-time crash when torch missing).
+
+Commit message suggestion:
+"Fix NullTraceAnalyzer indentation and guard optional torch autoencoder"
