@@ -1,0 +1,5 @@
+PATCH NOTES (v4)
+- Fix CI unit tests failing on Python 3.10/3.11/3.12
+  Cause: dynamic import did not register module in sys.modules, breaking dataclasses with postponed annotations.
+- tests/test_smoke.py now uses `import echonull`
+- benchmarks/perf_test.py now ensures repo root is on sys.path then imports echonull

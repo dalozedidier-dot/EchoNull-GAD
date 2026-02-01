@@ -1,31 +1,21 @@
-# NullTrace
+# EchoNull-GAD
 
-Prototype v0.1 du module NullTrace.
+Lightweight CI-native framework for graph anomaly detection via parameter sweeps.
 
-## Installation
-pip install -r requirements.txt
-pip install -r requirements-dev.txt
-pre-commit install
+**Scaling Status** (February 2026)
 
-## Lancement
-python src/null_trace.py tests/data/current.csv --previous-shadow tests/data/previous_shadow.csv --output-dir outputs
+| Runs | Mode | Status | Time | Zip Size | Notes |
+|------|------|--------|------|----------|-------|
+| 50   | sweep | ✅ OK | ~15 min | ~100 Mo | Good variance in GAD scores |
+| 100  | sweep | À tester | ~30 min est. | ~200 Mo est. | - |
+| 200  | sweep | À tester | ~60 min est. | ~400 Mo est. | - |
 
-## Objectif
-Produire un shadow descriptif et un diff descriptif entre deux versions de données.
+To test scaling, use the Actions workflow.
 
-## Format attendu des CSV
+**Latest Viz (from 50 runs)**
+![Viz Overview](viz_overview.png)
 
-NullTrace utilise deux fichiers de référence :
-
-- `data/current.csv`
-- `data/previous_shadow.csv` (ou un `manifest.json` produit par un snapshot précédent)
-
-Contraintes minimales :
-- CSV UTF-8, séparateur `,`
-- Ligne d’en-tête obligatoire
-- Colonnes numériques privilégiées (les colonnes non numériques peuvent être ignorées selon l’implémentation)
-- Ordre des lignes stable si tu compares des snapshots alignés (sinon utiliser une clé/colonne d’index dans les données)
-
-Fixtures de test :
-- `tests/data/current.csv`
-- `tests/data/previous_shadow.csv`
+**Usage**
+```bash
+python echonull.py sweep --runs 100
+```

@@ -1,18 +1,15 @@
 import time
-import importlib.util
+import sys
 from pathlib import Path
 
-def load_echonull_module():
-    repo_root = Path(__file__).resolve().parents[1]
-    echonull_path = repo_root / "echonull.py"
-    spec = importlib.util.spec_from_file_location("echonull_mod", echonull_path)
-    mod = importlib.util.module_from_spec(spec)
-    assert spec and spec.loader
-    spec.loader.exec_module(mod)
-    return mod
+# Ensure repo root is on sys.path so `import echonull` works reliably
+REPO_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(REPO_ROOT))
+
+import echonull  # noqa: E402
+
 
 def bench():
-    echonull = load_echonull_module()
     start = time.time()
     params = {
         "runs": 10,
@@ -28,6 +25,7 @@ def bench():
     orchestrator = echonull.EchoNullOrchestrator(params)
     orchestrator.run_sweep()
     print(f"Bench 10 runs: {time.time() - start:.2f} s")
+
 
 if __name__ == "__main__":
     bench()

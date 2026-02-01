@@ -1,2 +1,8 @@
-pandas>=2.2.2
-numpy>=1.26.4
+numpy>=1.26
+pandas>=2.2
+matplotlib>=3.8
+networkx>=3.2
+torch>=2.2
+tqdm>=4.66
+memory_profiler>=0.61
+dask[distributed]>=2024.2

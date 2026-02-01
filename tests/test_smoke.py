@@ -1,16 +1,9 @@
 from pathlib import Path
-import importlib.util
 
-def _load_echonull():
-    # Import echonull.py as module even if repo is not packaged
-    spec = importlib.util.spec_from_file_location("echonull", "echonull.py")
-    mod = importlib.util.module_from_spec(spec)
-    assert spec and spec.loader
-    spec.loader.exec_module(mod)
-    return mod
+import echonull
+
 
 def test_compute_sha256():
-    echonull = _load_echonull()
     p = Path("tmp_test.txt")
     p.write_text("test", encoding="utf-8")
     try:
