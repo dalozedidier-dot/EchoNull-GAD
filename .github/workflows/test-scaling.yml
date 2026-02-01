@@ -80,6 +80,12 @@ jobs:
           echo "Output size"
           du -sh _echonull_out 2>/dev/null || true
 
+      - name: Compute hash of final zip
+        if: always()
+        shell: bash
+        run: |
+          find _echonull_out -name "*.zip" -exec sha256sum {} \; >> echonull.log || true
+
       - name: Upload all results (even on failure)
         if: always()
         uses: actions/upload-artifact@v4
