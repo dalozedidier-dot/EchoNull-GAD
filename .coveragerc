@@ -1,0 +1,15 @@
+[run]
+branch = False
+source =
+    echonull
+omit =
+    tests/*
+    benchmarks/*
+    results/*
+    *_out/*
+    _echonull_out/*
+    dd_shadow.py
+
+[report]
+show_missing = True
+skip_covered = True
