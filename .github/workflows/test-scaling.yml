@@ -4,41 +4,83 @@ on:
   workflow_dispatch:
     inputs:
       runs:
-        description: 'Nombre de runs à tester (ex: 50 ou 100)'
+        description: "Nombre de runs (50, 100, 200...)"
         required: true
-        default: '50'
+        default: "50"
       mode:
-        description: 'Mode à exécuter (sweep ou gad)'
+        description: "Mode : sweep ou gad"
         required: false
-        default: 'sweep'
+        default: "sweep"
 
 jobs:
   test:
     runs-on: ubuntu-latest
+    timeout-minutes: 180
     steps:
-      - name: Checkout repository
+      - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Set up Python 3.12
+      - name: Setup Python 3.12
         uses: actions/setup-python@v5
         with:
-          python-version: '3.12'
+          python-version: "3.12"
+          cache: "pip"
 
-      - name: Install dependencies
+      - name: Install dependencies (robust)
+        shell: bash
         run: |
+          set -e
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
+          echo "Trying full requirements install"
+          if ! pip install -r requirements.txt --retries 3 --timeout 60; then
+            echo "Full requirements failed, installing minimal set for sweep+viz"
+            pip install numpy pandas matplotlib networkx tqdm --retries 3 --timeout 60
+          fi
+          python -m pip freeze | sed -n '1,200p'
 
-      - name: Run EchoNull
+      - name: Prepare folders
+        shell: bash
         run: |
-          python echonull.py ${{ inputs.mode }} \
-            --runs ${{ inputs.runs }} \
-            --thresholds 0.25,0.5,0.7,0.8 \
-            --seed-base 1000 \
-            --workers 8 \
-            --enable-viz || echo "Execution completed with exit code $?"
+          mkdir -p _echonull_out
+          echo "Disk before run"
+          df -h
 
-      - name: Upload all results
+      - name: Run EchoNull (retry 3x)
+        id: run_echonull
+        continue-on-error: true
+        shell: bash
+        env:
+          PYTHONUNBUFFERED: "1"
+        run: |
+          set +e
+          for attempt in 1 2 3; do
+            echo "Attempt ${attempt}/3"
+            python echonull.py ${{ inputs.mode }}               --runs ${{ inputs.runs }}               --thresholds 0.25,0.5,0.7,0.8               --seed-base 1000               --workers 8               --enable-viz
+            code=$?
+            echo "Exit code: ${code}"
+            if [ "${code}" -eq 0 ]; then
+              break
+            fi
+            sleep 10
+          done
+          exit 0
+
+      - name: Quick stats (sizes, zip, counts)
+        if: always()
+        shell: bash
+        run: |
+          echo "Disk after run"
+          df -h || true
+          echo "Output tree (top)"
+          find _echonull_out -maxdepth 3 -type f | sed -n '1,200p' || true
+          echo "Run folders count"
+          find _echonull_out -type d -name "run_*" | wc -l || true
+          echo "Zip files"
+          ls -lh _echonull_out/*.zip 2>/dev/null || true
+          echo "Output size"
+          du -sh _echonull_out 2>/dev/null || true
+
+      - name: Upload all results (even on failure)
         if: always()
         uses: actions/upload-artifact@v4
         with:
@@ -50,4 +92,11 @@ jobs:
             *.png
             *.json
             *.csv
-          retention-days: 7
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Show log tail (last 40 lines)
+        if: always()
+        shell: bash
+        run: |
+          tail -n 40 echonull.log 2>/dev/null || echo "No log file found"
