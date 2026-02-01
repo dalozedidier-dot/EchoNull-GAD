@@ -1,6 +1,11 @@
+import sys
 from pathlib import Path
 
-import echonull
+# Ensure repo root is importable so `import echonull` works on GitHub Actions
+REPO_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(REPO_ROOT))
+
+import echonull  # noqa: E402
 
 
 def test_compute_sha256():
