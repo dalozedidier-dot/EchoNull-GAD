@@ -74,24 +74,27 @@ except Exception:  # pragma: no cover
     memory_profiler = None
 
 
-# Torch optional: define the autoencoder class only if torch is available
-def _make_denoising_autoencoder():
-    if nn is None:
-        return None
-
+# Torch optional: define the autoencoder only if torch is available
+if nn is not None:
     class DenoisingAutoencoder(nn.Module):  # type: ignore[misc]
         def __init__(self, input_size: int = 50):
             super().__init__()
-            self.encoder = nn.Sequential(nn.Linear(input_size, 32), nn.ReLU(), nn.Linear(32, 16))
-            self.decoder = nn.Sequential(nn.Linear(16, 32), nn.ReLU(), nn.Linear(32, input_size))
+            self.encoder = nn.Sequential(
+                nn.Linear(input_size, 32),
+                nn.ReLU(),
+                nn.Linear(32, 16),
+            )
+            self.decoder = nn.Sequential(
+                nn.Linear(16, 32),
+                nn.ReLU(),
+                nn.Linear(32, input_size),
+            )
 
         def forward(self, x):
             return self.decoder(self.encoder(x))
+else:  # pragma: no cover
+    DenoisingAutoencoder = None  # type: ignore[assignment]
 
-    return DenoisingAutoencoder
-
-
-_DENOISING_AUTOENCODER = _make_denoising_autoencoder()
 
 logger = logging.getLogger("EchoNull")
 logger.setLevel(logging.INFO)
@@ -262,14 +265,6 @@ class RiftLensAnalyzer(AnalyzerProtocol):
 
 
 class NullTraceAnalyzer(AnalyzerProtocol):
-    def __init__(self, input_size: int = 50):
-            super().__init__()
-            self.encoder = nn.Sequential(nn.Linear(input_size, 32), nn.ReLU(), nn.Linear(32, 16))
-            self.decoder = nn.Sequential(nn.Linear(16, 32), nn.ReLU(), nn.Linear(32, input_size))
-
-        def forward(self, x):
-            return self.decoder(self.encoder(x))
-
     def __init__(self, use_ml: bool = False):
         self.use_ml = bool(use_ml)
         self.model = None
@@ -277,9 +272,9 @@ class NullTraceAnalyzer(AnalyzerProtocol):
         self.criterion = None
 
         if self.use_ml:
-            if torch is None or nn is None or _DENOISING_AUTOENCODER is None:
+            if torch is None or DenoisingAutoencoder is None:
                 raise RuntimeError("torch n'est pas installé.")
-            self.model = _DENOISING_AUTOENCODER()  # type: ignore[operator]
+            self.model = DenoisingAutoencoder()
             self.optimizer = torch.optim.Adam(self.model.parameters(), lr=0.01)
             self.criterion = nn.MSELoss()
 
