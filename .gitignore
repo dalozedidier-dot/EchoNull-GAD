@@ -1,0 +1,32 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+.venv/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.hypothesis/
+
+# Outputs
+outputs/
+vault_test/
+
+# Data
+data/
+!data/current.csv
+!data/previous_shadow.csv
+# Test fixtures remain tracked
+!tests/data/
+
+# Dev & OS
+.coverage
+coverage.xml
+htmlcov/
+mkdocs/build/
+.DS_Store
+Thumbs.db
