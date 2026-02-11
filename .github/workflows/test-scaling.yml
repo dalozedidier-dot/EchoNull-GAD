@@ -92,12 +92,9 @@ jobs:
         with:
           name: echonull-results-${{ inputs.runs }}-runs-${{ inputs.mode }}
           path: |
-            _echonull_out/
+            _echonull_out/**
             echonull.log
             manifest.json
-            *.png
-            *.json
-            *.csv
           if-no-files-found: warn
           retention-days: 14
 

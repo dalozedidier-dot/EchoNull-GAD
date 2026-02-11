@@ -25,6 +25,7 @@ import datetime
 import hashlib
 import json
 import logging
+import math
 import os
 import shutil
 import time
@@ -193,6 +194,24 @@ def _clip01(x: float) -> float:
     return float(max(0.0, min(1.0, x)))
 
 
+
+def _sigmoid(x: float) -> float:
+    # Numerically stable sigmoid for typical ranges.
+    if x >= 60.0:
+        return 1.0
+    if x <= -60.0:
+        return 0.0
+    return float(1.0 / (1.0 + math.exp(-x)))
+
+
+def _log10_sigmoid(x: float, center: float, scale: float, eps: float = 1e-12) -> float:
+    # Map positive values to [0, 1] using a sigmoid of log10(x).
+    # center: log10 value where output is 0.5. Example: center=-2.0 targets x≈1e-2.
+    # scale: controls steepness. Smaller => sharper transition.
+    lx = math.log10(max(0.0, float(x)) + eps)
+    z = (lx - float(center)) / float(scale)
+    return _sigmoid(z)
+
 def compute_anomaly_score(
     rift_by_thr: Dict[float, Dict[str, Any]],
     nulltrace: Dict[str, Any],
@@ -209,8 +228,11 @@ def compute_anomaly_score(
 
     p99 = float(nulltrace.get("abs_p99", 0.0))
     mad = float(nulltrace.get("abs_mad", 0.0))
-    p99_component = _clip01((np.log10(p99 + 1e-12) + 12.0) / 6.0)
-    mad_component = _clip01((np.log10(mad + 1e-12) + 12.0) / 6.0)
+
+    # NullTrace scaling: keep it discriminant in the typical synthetic range.
+    # We map log10(p99) around 1e-2 to ~0.5 with a smooth transition.
+    p99_component = _log10_sigmoid(p99, center=-2.0, scale=0.35)
+    mad_component = _log10_sigmoid(mad, center=-2.5, scale=0.35)
     null_component = _clip01(0.7 * p99_component + 0.3 * mad_component)
 
     void_count = float(voidmark.get("anomaly_count", 0.0))

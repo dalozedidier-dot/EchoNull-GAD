@@ -1,0 +1,8 @@
+2026-02-11 17:18:51,359 | INFO    | analyze took 0.0151s
+2026-02-11 17:18:51,363 | INFO    | analyze took 0.0032s
+2026-02-11 17:18:51,364 | INFO    | analyze took 0.0002s
+2026-02-11 17:18:51,393 | INFO    | analyze took 0.0116s
+2026-02-11 17:18:51,428 | INFO    | analyze took 0.0342s
+2026-02-11 17:18:51,429 | INFO    | analyze took 0.0001s
+2026-02-11 17:18:51,998 | INFO    | Artefacts saved: /tmp/pytest-of-oai/pytest-0/test_orchestrator_two_runs_art0/_echonull_out/sweep_test.zip
+2026-02-11 17:18:52,001 | INFO    | Manifest written: /tmp/pytest-of-oai/pytest-0/test_orchestrator_two_runs_art0/_echonull_out/sweep_test/manifest.json and manifest.json
