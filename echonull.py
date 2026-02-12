@@ -50,34 +50,35 @@ tqdm: _Any | None = None
 
 # Optionnels
 try:
-    import matplotlib.pyplot as plt  # type: ignore
+    import matplotlib.pyplot as plt
 except Exception:  # pragma: no cover
-    pass
+    plt = None
 
 try:
-    import torch  # type: ignore
-    import torch.nn as nn  # type: ignore
+    import torch
+    import torch.nn as nn
 except Exception:  # pragma: no cover
-    pass
+    torch = None
+    nn = None
 
 try:
-    from tqdm import tqdm  # type: ignore
+    from tqdm import tqdm
 except Exception:  # pragma: no cover
-    pass
+    tqdm = None
 
 try:
-    import networkx as nx  # type: ignore
+    import networkx as nx
 except Exception:  # pragma: no cover
     nx = None
 
 try:
-    from dask.distributed import Client, LocalCluster  # type: ignore
+    from dask.distributed import Client, LocalCluster
 except Exception:  # pragma: no cover
     Client = None
     LocalCluster = None
 
 try:
-    import memory_profiler  # type: ignore
+    import memory_profiler
 except Exception:  # pragma: no cover
     memory_profiler = None
 
@@ -88,7 +89,7 @@ DenoisingAutoencoder: _Any = None
 if torch is not None and nn is not None:
     _nn = cast(_Any, nn)
 
-    class _DenoisingAutoencoder(_nn.Module):  # type: ignore[misc,name-defined]
+    class _DenoisingAutoencoder(_nn.Module):
         def __init__(self, input_size: int = 50) -> None:
             super().__init__()
             self.encoder = _nn.Sequential(
