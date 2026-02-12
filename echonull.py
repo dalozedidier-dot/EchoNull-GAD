@@ -28,7 +28,6 @@ import json
 import logging
 import math
 import os
-import shutil
 import time
 import sys
 import unittest
@@ -37,28 +36,34 @@ from concurrent.futures import ProcessPoolExecutor, as_completed
 from dataclasses import dataclass, asdict, field
 from functools import wraps
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Protocol, Tuple
+from typing import Any, Dict, List, Optional, Protocol, Tuple, cast
 
 import numpy as np
 import pandas as pd
+
+from typing import Any as _Any
+
+plt: _Any | None = None
+nn: _Any | None = None
+torch: _Any | None = None
+tqdm: _Any | None = None
 
 # Optionnels
 try:
     import matplotlib.pyplot as plt  # type: ignore
 except Exception:  # pragma: no cover
-    plt = None
+    pass
 
 try:
     import torch  # type: ignore
     import torch.nn as nn  # type: ignore
 except Exception:  # pragma: no cover
-    torch = None
-    nn = None
+    pass
 
 try:
     from tqdm import tqdm  # type: ignore
 except Exception:  # pragma: no cover
-    tqdm = None
+    pass
 
 try:
     import networkx as nx  # type: ignore
@@ -77,34 +82,39 @@ except Exception:  # pragma: no cover
     memory_profiler = None
 
 
-# Torch optional: define the autoencoder only if torch is available
-if nn is not None:
-    class DenoisingAutoencoder(nn.Module):  # type: ignore[misc]
-        def __init__(self, input_size: int = 50):
+# Torch optional: define a local autoencoder class only if torch is available.
+# We keep typing permissive because torch is an optional dependency.
+DenoisingAutoencoder: _Any = None
+if torch is not None and nn is not None:
+    _nn = cast(_Any, nn)
+
+    class _DenoisingAutoencoder(_nn.Module):  # type: ignore[misc,name-defined]
+        def __init__(self, input_size: int = 50) -> None:
             super().__init__()
-            self.encoder = nn.Sequential(
-                nn.Linear(input_size, 32),
-                nn.ReLU(),
-                nn.Linear(32, 16),
+            self.encoder = _nn.Sequential(
+                _nn.Linear(input_size, 32),
+                _nn.ReLU(),
+                _nn.Linear(32, 16),
             )
-            self.decoder = nn.Sequential(
-                nn.Linear(16, 32),
-                nn.ReLU(),
-                nn.Linear(32, input_size),
+            self.decoder = _nn.Sequential(
+                _nn.Linear(16, 32),
+                _nn.ReLU(),
+                _nn.Linear(32, input_size),
             )
 
-        def forward(self, x):
+        def forward(self, x: _Any) -> _Any:
             return self.decoder(self.encoder(x))
-else:  # pragma: no cover
-    DenoisingAutoencoder = None  # type: ignore[assignment]
 
+    DenoisingAutoencoder = _DenoisingAutoencoder
 
 logger = logging.getLogger("EchoNull")
 logger.setLevel(logging.INFO)
 
 if not logger.handlers:
     console_handler = logging.StreamHandler()
-    console_handler.setFormatter(logging.Formatter("%(asctime)s | %(levelname)-7s | %(message)s"))
+    console_handler.setFormatter(
+        logging.Formatter("%(asctime)s | %(levelname)-7s | %(message)s")
+    )
     logger.addHandler(console_handler)
 
 _FILE_LOG_PATH: Optional[Path] = None
@@ -128,7 +138,9 @@ def ensure_file_logging(log_path: Path) -> None:
 
     log_path.parent.mkdir(parents=True, exist_ok=True)
     file_handler = logging.FileHandler(str(log_path), mode="a", encoding="utf-8")
-    file_handler.setFormatter(logging.Formatter("%(asctime)s | %(levelname)-7s | %(message)s"))
+    file_handler.setFormatter(
+        logging.Formatter("%(asctime)s | %(levelname)-7s | %(message)s")
+    )
     logger.addHandler(file_handler)
     _FILE_LOG_PATH = log_path
 
@@ -192,8 +204,9 @@ class RunResult:
 
 
 class AnalyzerProtocol(Protocol):
-    def analyze(self, run_id: int, seed: int, data: Any, output_dir: Path) -> Dict[str, Any]:
-        ...
+    def analyze(
+        self, run_id: int, seed: int, data: Any, output_dir: Path
+    ) -> Dict[str, Any]: ...
 
 
 def perf_timer(func):
@@ -204,6 +217,7 @@ def perf_timer(func):
         duration = time.perf_counter() - start
         logger.info(f"{func.__name__} took {duration:.4f}s")
         return result
+
     return wrapper
 
 
@@ -219,7 +233,6 @@ def compute_sha256(path: Path) -> str:
         for chunk in iter(lambda: f.read(65536), b""):
             sha256.update(chunk)
     return sha256.hexdigest()
-
 
 
 def _guess_graph_format(path: str) -> str:
@@ -269,11 +282,13 @@ def load_graph(path: str, fmt: Optional[str] = None) -> "nx.Graph":
     if f == "csv":
         df = pd.read_csv(p)
         cols = [c.lower().strip() for c in df.columns]
+
         def pick(*names: str) -> Optional[str]:
             for n in names:
                 if n in cols:
-                    return df.columns[cols.index(n)]
+                    return str(df.columns[cols.index(n)])
             return None
+
         c_src = pick("source", "src", "start", "from", "u")
         c_dst = pick("target", "dst", "end", "to", "v")
         if c_src is None or c_dst is None:
@@ -282,7 +297,9 @@ def load_graph(path: str, fmt: Optional[str] = None) -> "nx.Graph":
                 raise ValueError("CSV edge list needs at least 2 columns.")
             c_src, c_dst = df.columns[0], df.columns[1]
         g = nx.Graph()
-        g.add_edges_from(zip(df[c_src].astype(str), df[c_dst].astype(str), strict=False))
+        g.add_edges_from(
+            zip(df[c_src].astype(str), df[c_dst].astype(str), strict=False)
+        )
         return g
     if f == "json":
         obj = json.loads(p.read_text(encoding="utf-8"))
@@ -378,7 +395,6 @@ def _clip01(x: float) -> float:
     return float(max(0.0, min(1.0, x)))
 
 
-
 def _sigmoid(x: float) -> float:
     # Numerically stable sigmoid for typical ranges.
     if x >= 60.0:
@@ -395,6 +411,7 @@ def _log10_sigmoid(x: float, center: float, scale: float, eps: float = 1e-12) ->
     lx = math.log10(max(0.0, float(x)) + eps)
     z = (lx - float(center)) / float(scale)
     return _sigmoid(z)
+
 
 def compute_anomaly_score(
     rift_by_thr: Dict[float, Dict[str, Any]],
@@ -422,7 +439,11 @@ def compute_anomaly_score(
     void_count = float(voidmark.get("anomaly_count", 0.0))
     void_component = _clip01(void_count / 5.0)
 
-    score = (w_jaccard * graph_component) + (w_p99 * null_component) + (w_void * void_component)
+    score = (
+        (w_jaccard * graph_component)
+        + (w_p99 * null_component)
+        + (w_void * void_component)
+    )
     return float(_clip01(score))
 
 
@@ -473,7 +494,9 @@ class RiftLensAnalyzer(AnalyzerProtocol):
         return g, int(silent_nodes), float(edge_keep_ratio)
 
     @perf_timer
-    def analyze(self, run_id: int, seed: int, data: Any, output_dir: Path) -> Dict[str, Any]:
+    def analyze(
+        self, run_id: int, seed: int, data: Any, output_dir: Path
+    ) -> Dict[str, Any]:
         if nx is None:
             raise RuntimeError("networkx n'est pas installé.")
 
@@ -484,7 +507,9 @@ class RiftLensAnalyzer(AnalyzerProtocol):
             thr = float(thr)
 
             if base_g is None:
-                rng = np.random.default_rng(seed + int(run_id) * 100_000 + int(thr * 10_000))
+                rng = np.random.default_rng(
+                    seed + int(run_id) * 100_000 + int(thr * 10_000)
+                )
                 g = nx.erdos_renyi_graph(
                     n=10 + run_id % 5,
                     p=0.2 + thr / 2,
@@ -508,7 +533,9 @@ class RiftLensAnalyzer(AnalyzerProtocol):
                 # Since sampled is (mostly) a subset of base edges, jaccard reduces
                 # to the edge keep ratio.
                 jaccard = float(edge_keep_ratio)
-                anomaly_flag = bool((edge_keep_ratio < thr * 0.75) or (silent_nodes > 0))
+                anomaly_flag = bool(
+                    (edge_keep_ratio < thr * 0.75) or (silent_nodes > 0)
+                )
 
             report_path = output_dir / f"reports/thr_{thr:.2f}/graph_report.json"
             report_path.parent.mkdir(parents=True, exist_ok=True)
@@ -582,9 +609,11 @@ class NullTraceAnalyzer(AnalyzerProtocol):
                 raise RuntimeError("torch n'est pas installé.")
             self.model = DenoisingAutoencoder()
             self.optimizer = torch.optim.Adam(self.model.parameters(), lr=0.01)
-            self.criterion = nn.MSELoss()
+            self.criterion = cast(_Any, nn).MSELoss()
 
-    def _graph_null_deltas(self, run_id: int, seed: int) -> Tuple[np.ndarray, float, float]:
+    def _graph_null_deltas(
+        self, run_id: int, seed: int
+    ) -> Tuple[np.ndarray, float, float]:
         if not self.graph_path:
             raise RuntimeError("graph_path is not set")
         if nx is None:
@@ -600,7 +629,9 @@ class NullTraceAnalyzer(AnalyzerProtocol):
         for thr in self.thresholds:
             thr = float(thr)
             # Use the exact same deterministic sampling as RiftLensAnalyzer
-            rng = np.random.default_rng(seed + int(run_id) * 100_000 + int(thr * 10_000))
+            rng = np.random.default_rng(
+                seed + int(run_id) * 100_000 + int(thr * 10_000)
+            )
             edges = list(base_g.edges())
             keep_mask = rng.random(len(edges)) < thr
             kept_edges = [e for e, k in zip(edges, keep_mask, strict=False) if k]
@@ -618,10 +649,12 @@ class NullTraceAnalyzer(AnalyzerProtocol):
             silent_total += int(silent_nodes)
 
             expected = thr * float(base_edges)
-            deficit = max(0.0, (expected - float(g.number_of_edges())) / float(base_edges))
+            deficit = max(
+                0.0, (expected - float(g.number_of_edges())) / float(base_edges)
+            )
             # Expand into a small cloud to make robust percentiles/MAD meaningful.
             noise = rng.normal(0.0, max(1e-8, deficit * 0.05), size=12)
-            for v in (deficit + np.abs(noise)):
+            for v in deficit + np.abs(noise):
                 deltas.append(float(abs(v)))
 
         arr = np.asarray(deltas, dtype=float)
@@ -637,15 +670,17 @@ class NullTraceAnalyzer(AnalyzerProtocol):
         return arr, missing_edge_ratio, isolated_ratio
 
     @perf_timer
-    def analyze(self, run_id: int, seed: int, data: Any, output_dir: Path) -> Dict[str, Any]:
+    def analyze(
+        self, run_id: int, seed: int, data: Any, output_dir: Path
+    ) -> Dict[str, Any]:
         np.random.seed(seed)
 
         graph_missing_edge_ratio = 0.0
         graph_isolated_ratio = 0.0
 
         if self.graph_path:
-            abs_deltas, graph_missing_edge_ratio, graph_isolated_ratio = self._graph_null_deltas(
-                run_id, seed
+            abs_deltas, graph_missing_edge_ratio, graph_isolated_ratio = (
+                self._graph_null_deltas(run_id, seed)
             )
         else:
             # Legacy synthetic null-trace deltas
@@ -688,10 +723,11 @@ class NullTraceAnalyzer(AnalyzerProtocol):
         }
 
 
-
 class VoidMarkAnalyzer(AnalyzerProtocol):
     @perf_timer
-    def analyze(self, run_id: int, seed: int, data: Any, output_dir: Path) -> Dict[str, Any]:
+    def analyze(
+        self, run_id: int, seed: int, data: Any, output_dir: Path
+    ) -> Dict[str, Any]:
         np.random.seed(seed)
         count = int(np.random.randint(1, 5))
         anomaly_count = int(count if count > 2 else 0)
@@ -750,8 +786,12 @@ def process_run_worker(run_id: int, params: Dict[str, Any]) -> RunResult:
     rift_results: List[RiftLensResult] = rift_analyzer.analyze(
         run_id, seed, data, run_dir
     )["riftlens"]
-    null_result: NullTraceResult = null_analyzer.analyze(run_id, seed, data, run_dir)["nulltrace"]
-    void_result: VoidMarkResult = void_analyzer.analyze(run_id, seed, data, run_dir)["voidmark"]
+    null_result: NullTraceResult = null_analyzer.analyze(run_id, seed, data, run_dir)[
+        "nulltrace"
+    ]
+    void_result: VoidMarkResult = void_analyzer.analyze(run_id, seed, data, run_dir)[
+        "voidmark"
+    ]
 
     gad_score = compute_anomaly_score(
         {r.threshold: r.__dict__ for r in rift_results},
@@ -845,7 +885,9 @@ class EchoNullOrchestrator:
                 "use_dask": bool(self.params.get("use_dask", False)),
                 "enable_ml": bool(self.params.get("enable_ml", False)),
                 "enable_viz": bool(self.params.get("enable_viz", False)),
-                "score_weights": list(self.params.get("score_weights", (0.4, 0.4, 0.2))),
+                "score_weights": list(
+                    self.params.get("score_weights", (0.4, 0.4, 0.2))
+                ),
             },
         }
         return overview
@@ -858,7 +900,9 @@ class EchoNullOrchestrator:
 
         gad_scores = [r.gad_score for r in results]
         p99_deltas = [r.nulltrace.abs_p99 for r in results]
-        n_edges_avg = [float(np.mean([rl.n_edges for rl in r.riftlens])) for r in results]
+        n_edges_avg = [
+            float(np.mean([rl.n_edges for rl in r.riftlens])) for r in results
+        ]
 
         fig, axs = plt.subplots(1, 2, figsize=(12, 5))
         axs[0].hist(gad_scores, bins=20, color="cyan", label="GAD Scores")
@@ -874,7 +918,9 @@ class EchoNullOrchestrator:
         logger.info(f"Viz generated: {viz_path}")
         return viz_path
 
-    def save_artifacts(self, results: List[RunResult], overview: Dict[str, Any]) -> Dict[str, Path]:
+    def save_artifacts(
+        self, results: List[RunResult], overview: Dict[str, Any]
+    ) -> Dict[str, Path]:
         self.output_base.mkdir(parents=True, exist_ok=True)
 
         overview_path = self.output_base / "overview.json"
@@ -927,8 +973,12 @@ class EchoNullOrchestrator:
                     "abs_mad": float(n.abs_mad),
                     "abs_max": float(n.abs_max),
                     "denoised_mean": float(n.denoised_mean),
-                    "graph_missing_edge_ratio": float(getattr(n, "graph_missing_edge_ratio", 0.0)),
-                    "graph_isolated_ratio": float(getattr(n, "graph_isolated_ratio", 0.0)),
+                    "graph_missing_edge_ratio": float(
+                        getattr(n, "graph_missing_edge_ratio", 0.0)
+                    ),
+                    "graph_isolated_ratio": float(
+                        getattr(n, "graph_isolated_ratio", 0.0)
+                    ),
                 }
             )
         pd.DataFrame(null_rows).to_csv(null_path, index=False)
@@ -982,10 +1032,14 @@ def build_manifest(
 ) -> Dict[str, Any]:
     zip_sha = compute_sha256(artifact_paths["zip"]) if artifact_paths.get("zip") else ""
     overview_sha = (
-        compute_sha256(artifact_paths["overview"]) if artifact_paths.get("overview") else ""
+        compute_sha256(artifact_paths["overview"])
+        if artifact_paths.get("overview")
+        else ""
     )
     run_summary_sha = (
-        compute_sha256(artifact_paths["run_summary"]) if artifact_paths.get("run_summary") else ""
+        compute_sha256(artifact_paths["run_summary"])
+        if artifact_paths.get("run_summary")
+        else ""
     )
     env_sha = compute_sha256(artifact_paths["env"]) if artifact_paths.get("env") else ""
     rift_sha = (
@@ -993,10 +1047,20 @@ def build_manifest(
         if artifact_paths.get("riftlens_by_threshold")
         else ""
     )
-    null_sha = compute_sha256(artifact_paths["nulltrace"]) if artifact_paths.get("nulltrace") else ""
-    void_sha = compute_sha256(artifact_paths["voidmark"]) if artifact_paths.get("voidmark") else ""
+    null_sha = (
+        compute_sha256(artifact_paths["nulltrace"])
+        if artifact_paths.get("nulltrace")
+        else ""
+    )
+    void_sha = (
+        compute_sha256(artifact_paths["voidmark"])
+        if artifact_paths.get("voidmark")
+        else ""
+    )
     runs_jsonl_sha = (
-        compute_sha256(artifact_paths["runs_jsonl"]) if artifact_paths.get("runs_jsonl") else ""
+        compute_sha256(artifact_paths["runs_jsonl"])
+        if artifact_paths.get("runs_jsonl")
+        else ""
     )
     viz_sha = compute_sha256(viz_path) if viz_path and viz_path.exists() else ""
 
@@ -1012,7 +1076,9 @@ def build_manifest(
                     "prev_shadow_hash": r.prev_shadow_hash,
                     "current_hash": r.current_hash,
                     "gad_score": r.gad_score,
-                    "riftlens_flags": {str(x.threshold): bool(x.anomaly_flag) for x in r.riftlens},
+                    "riftlens_flags": {
+                        str(x.threshold): bool(x.anomaly_flag) for x in r.riftlens
+                    },
                     "nulltrace_p99": r.nulltrace.abs_p99,
                     "voidmark_anomaly_count": r.voidmark.anomaly_count,
                 }
@@ -1024,7 +1090,10 @@ def build_manifest(
         "version": VERSION,
         "generated_utc": datetime.datetime.utcnow().isoformat() + "Z",
         "output_base": str(output_base),
-        "overview": {"path": str(artifact_paths.get("overview", "")), "sha256": overview_sha},
+        "overview": {
+            "path": str(artifact_paths.get("overview", "")),
+            "sha256": overview_sha,
+        },
         "env": {"path": str(artifact_paths.get("env", "")), "sha256": env_sha},
         "run_summary": {
             "path": str(artifact_paths.get("run_summary", "")),
@@ -1034,9 +1103,18 @@ def build_manifest(
             "path": str(artifact_paths.get("riftlens_by_threshold", "")),
             "sha256": rift_sha,
         },
-        "nulltrace": {"path": str(artifact_paths.get("nulltrace", "")), "sha256": null_sha},
-        "voidmark": {"path": str(artifact_paths.get("voidmark", "")), "sha256": void_sha},
-        "runs_jsonl": {"path": str(artifact_paths.get("runs_jsonl", "")), "sha256": runs_jsonl_sha},
+        "nulltrace": {
+            "path": str(artifact_paths.get("nulltrace", "")),
+            "sha256": null_sha,
+        },
+        "voidmark": {
+            "path": str(artifact_paths.get("voidmark", "")),
+            "sha256": void_sha,
+        },
+        "runs_jsonl": {
+            "path": str(artifact_paths.get("runs_jsonl", "")),
+            "sha256": runs_jsonl_sha,
+        },
         "zip": {"path": str(artifact_paths.get("zip", "")), "sha256": zip_sha},
         "viz_overview": {"path": str(viz_path) if viz_path else "", "sha256": viz_sha},
         "overview_payload": overview,
@@ -1118,7 +1196,9 @@ def main():
     if output_base_arg:
         output_base = Path(output_base_arg)
     else:
-        output_base = BASE_OUTPUT_DIR / f"{getattr(args, 'command', 'sweep')}_{TIMESTAMP}"
+        output_base = (
+            BASE_OUTPUT_DIR / f"{getattr(args, 'command', 'sweep')}_{TIMESTAMP}"
+        )
 
     params: Dict[str, Any] = {
         "runs": int(getattr(args, "runs", 100)),
@@ -1129,7 +1209,9 @@ def main():
         "graph": str(getattr(args, "graph", "") or "").strip() or None,
         "graph_format": str(getattr(args, "graph_format", "") or "").strip() or None,
         "export_graphs": bool(getattr(args, "export_graphs", False)),
-        "manifest_max_detailed_runs": int(getattr(args, "manifest_max_detailed_runs", 200)),
+        "manifest_max_detailed_runs": int(
+            getattr(args, "manifest_max_detailed_runs", 200)
+        ),
         "use_dask": bool(getattr(args, "use_dask", False)),
         "enable_ml": bool(getattr(args, "enable_ml", False)),
         "enable_viz": bool(getattr(args, "enable_viz", False)),
@@ -1140,7 +1222,11 @@ def main():
         orchestrator = EchoNullOrchestrator(params)
         results = orchestrator.run_sweep()
         overview = orchestrator.generate_overview(results)
-        viz_path = orchestrator.generate_viz(results) if params.get("enable_viz", False) else None
+        viz_path = (
+            orchestrator.generate_viz(results)
+            if params.get("enable_viz", False)
+            else None
+        )
         artifact_paths = orchestrator.save_artifacts(results, overview)
 
         manifest = build_manifest(
@@ -1154,6 +1240,7 @@ def main():
         write_manifest(manifest, Path(params["output_base"]))
 
     elif args.command == "test":
+
         class TestEchoNull(unittest.TestCase):
             def test_hashing(self):
                 path = Path("test.txt")
@@ -1178,6 +1265,7 @@ def main():
         unittest.main(argv=["ignored", "-v"], exit=False)
 
     elif args.command == "bench":
+
         @memory_tracked
         def bench_sweep():
             params2 = dict(params)

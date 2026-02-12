@@ -56,15 +56,15 @@ def read_json(path: Path) -> Any:
 
 
 def is_numeric_dtype(dtype: Any) -> bool:
-    return pd.api.types.is_numeric_dtype(dtype)
+    return bool(pd.api.types.is_numeric_dtype(dtype))
 
 
 def is_datetime_dtype(dtype: Any) -> bool:
-    return pd.api.types.is_datetime64_any_dtype(dtype)
+    return bool(pd.api.types.is_datetime64_any_dtype(dtype))
 
 
 def is_bool_dtype(dtype: Any) -> bool:
-    return pd.api.types.is_bool_dtype(dtype)
+    return bool(pd.api.types.is_bool_dtype(dtype))
 
 
 def column_profile(s: pd.Series) -> Dict[str, Any]:
@@ -85,7 +85,10 @@ def column_profile(s: pd.Series) -> Dict[str, Any]:
 
     if is_numeric_dtype(s.dtype):
         # describe() renvoie aussi count/min/max/mean/std/quantiles
-        desc = s.astype("float64", errors="ignore").describe(percentiles=[0.25, 0.5, 0.75])
+        desc = s.astype("float64", errors="ignore").describe(
+            percentiles=[0.25, 0.5, 0.75]
+        )
+
         # Certaines colonnes numériques peuvent être entièrement NA.
         def _safe_get(k: str):
             v = desc.get(k, None)
@@ -96,15 +99,17 @@ def column_profile(s: pd.Series) -> Dict[str, Any]:
                 pass
             return None if v is None else float(v)
 
-        prof.update({
-            "min": _safe_get("min"),
-            "q25": _safe_get("25%"),
-            "median": _safe_get("50%"),
-            "q75": _safe_get("75%"),
-            "max": _safe_get("max"),
-            "mean": _safe_get("mean"),
-            "std": _safe_get("std"),
-        })
+        prof.update(
+            {
+                "min": _safe_get("min"),
+                "q25": _safe_get("25%"),
+                "median": _safe_get("50%"),
+                "q75": _safe_get("75%"),
+                "max": _safe_get("max"),
+                "mean": _safe_get("mean"),
+                "std": _safe_get("std"),
+            }
+        )
     elif is_datetime_dtype(s.dtype):
         # pour datetime, on reste descriptif
         try:
@@ -124,7 +129,9 @@ def column_profile(s: pd.Series) -> Dict[str, Any]:
         # texte / catégorie : top-3 valeurs (descriptif), limité
         try:
             vc = s.astype("string").value_counts(dropna=True).head(3)
-            prof["top_values"] = [{"value": str(k), "count": int(v)} for k, v in vc.items()]
+            prof["top_values"] = [
+                {"value": str(k), "count": int(v)} for k, v in vc.items()
+            ]
         except Exception:
             prof["top_values"] = None
 
@@ -140,7 +147,7 @@ def canonical_csv_bytes(df: pd.DataFrame) -> bytes:
         quoting=csv.QUOTE_MINIMAL,
         float_format="%.17g",
     )
-    return text.encode("utf-8")
+    return str(text).encode("utf-8")
 
 
 def build_table_profile(df: pd.DataFrame) -> Dict[str, Any]:
@@ -202,7 +209,12 @@ def diff_profiles(prev: Dict[str, Any], curr: Dict[str, Any]) -> Dict[str, Any]:
             # Deltas numériques si présents
             deltas = {}
             for k in ("mean", "std", "min", "max", "non_null", "null", "distinct"):
-                if k in p_cp and k in c_cp and p_cp[k] is not None and c_cp[k] is not None:
+                if (
+                    k in p_cp
+                    and k in c_cp
+                    and p_cp[k] is not None
+                    and c_cp[k] is not None
+                ):
                     try:
                         deltas[k + "_delta"] = c_cp[k] - p_cp[k]
                     except Exception:
@@ -264,7 +276,7 @@ def snapshot(
     write_json(profile_path, table_profile)
     profile_sha = sha256_file(profile_path)
 
-    manifest = {
+    manifest: Dict[str, Any] = {
         "tool": {"name": TOOL_NAME, "version": TOOL_VERSION},
         "created_at": utc_now_iso(),
         "source": {"path": str(csv_path.resolve()), "size_bytes": int(len(raw_bytes))},
@@ -309,7 +321,8 @@ def snapshot(
 
         prev_obj = {
             "raw_sha256": prev_raw or sha256_file(prev_dir / "shadow_raw.csv"),
-            "canonical_sha256": prev_canon or sha256_file(prev_dir / "shadow_canonical.csv"),
+            "canonical_sha256": prev_canon
+            or sha256_file(prev_dir / "shadow_canonical.csv"),
             "profile_sha256": prev_prof_sha or sha256_file(prev_profile_path),
             "table_profile": prev_table_profile,
         }
@@ -323,14 +336,19 @@ def snapshot(
         diff_obj = {
             "tool": {"name": TOOL_NAME, "version": TOOL_VERSION},
             "created_at": utc_now_iso(),
-            "before": {"shadow_id": prev_manifest.get("shadow_id"), "path": str(prev_dir)},
+            "before": {
+                "shadow_id": prev_manifest.get("shadow_id"),
+                "path": str(prev_dir),
+            },
             "after": {"shadow_id": shadow_id, "path": str(shadow_dir)},
             "diff": diff_profiles(prev_obj, curr_obj),
         }
 
         diff_path = shadow_dir / "shadow_diff.json"
         write_json(diff_path, diff_obj)
-        manifest["files"].append(
+        from typing import cast
+
+        cast(list[dict[str, Any]], manifest["files"]).append(
             {
                 "path": "shadow_diff.json",
                 "sha256": sha256_file(diff_path),
@@ -351,7 +369,9 @@ def snapshot(
     return result
 
 
-def compare(shadow_a: Path, shadow_b: Path, output_path: Optional[Path] = None) -> Dict[str, Any]:
+def compare(
+    shadow_a: Path, shadow_b: Path, output_path: Optional[Path] = None
+) -> Dict[str, Any]:
     a_dir, a_manifest = resolve_shadow_ref(shadow_a)
     b_dir, b_manifest = resolve_shadow_ref(shadow_b)
 
@@ -359,7 +379,8 @@ def compare(shadow_a: Path, shadow_b: Path, output_path: Optional[Path] = None) 
     b_profile = read_json(b_dir / "shadow_profile.json")
 
     a_obj = {
-        "raw_sha256": a_manifest.get("raw_sha256") or sha256_file(a_dir / "shadow_raw.csv"),
+        "raw_sha256": a_manifest.get("raw_sha256")
+        or sha256_file(a_dir / "shadow_raw.csv"),
         "canonical_sha256": (
             a_manifest.get("canonical_sha256")
             or sha256_file(a_dir / "shadow_canonical.csv")
@@ -371,7 +392,8 @@ def compare(shadow_a: Path, shadow_b: Path, output_path: Optional[Path] = None) 
         "table_profile": a_profile,
     }
     b_obj = {
-        "raw_sha256": b_manifest.get("raw_sha256") or sha256_file(b_dir / "shadow_raw.csv"),
+        "raw_sha256": b_manifest.get("raw_sha256")
+        or sha256_file(b_dir / "shadow_raw.csv"),
         "canonical_sha256": (
             b_manifest.get("canonical_sha256")
             or sha256_file(b_dir / "shadow_canonical.csv")
@@ -411,7 +433,9 @@ def build_arg_parser() -> argparse.ArgumentParser:
         default=None,
         help="Dossier shadow ou manifest.json précédent (optionnel)",
     )
-    ps.add_argument("--output-dir", type=str, default="dd_shadow_output", help="Dossier de sortie")
+    ps.add_argument(
+        "--output-dir", type=str, default="dd_shadow_output", help="Dossier de sortie"
+    )
     ps.add_argument(
         "--numeric-only",
         action="store_true",
@@ -423,7 +447,9 @@ def build_arg_parser() -> argparse.ArgumentParser:
     pc = sub.add_parser("compare", help="Comparer deux shadows existants")
     pc.add_argument("shadow_a", type=str, help="Dossier shadow ou manifest.json A")
     pc.add_argument("shadow_b", type=str, help="Dossier shadow ou manifest.json B")
-    pc.add_argument("--out", type=str, default=None, help="Chemin de sortie JSON (optionnel)")
+    pc.add_argument(
+        "--out", type=str, default=None, help="Chemin de sortie JSON (optionnel)"
+    )
 
     # compat: si l'utilisateur ne met pas de sous-commande, on traite comme snapshot
     p.add_argument("--csv-path", type=str, default=None, help=argparse.SUPPRESS)
@@ -455,14 +481,20 @@ def main() -> None:
             encoding=str(args.encoding),
         )
         # résumé minimal en stdout
-        print(json.dumps({
-            "shadow_dir": res["shadow_dir"],
-            "shadow_id": res["manifest"]["shadow_id"],
-            "raw_sha256": res["manifest"]["raw_sha256"],
-            "canonical_sha256": res["manifest"]["canonical_sha256"],
-            "profile_sha256": res["manifest"]["profile_sha256"],
-            "has_diff": "diff" in res,
-        }, indent=2, ensure_ascii=False))
+        print(
+            json.dumps(
+                {
+                    "shadow_dir": res["shadow_dir"],
+                    "shadow_id": res["manifest"]["shadow_id"],
+                    "raw_sha256": res["manifest"]["raw_sha256"],
+                    "canonical_sha256": res["manifest"]["canonical_sha256"],
+                    "profile_sha256": res["manifest"]["profile_sha256"],
+                    "has_diff": "diff" in res,
+                },
+                indent=2,
+                ensure_ascii=False,
+            )
+        )
 
     elif args.cmd == "compare":
         out = Path(args.out) if args.out else None

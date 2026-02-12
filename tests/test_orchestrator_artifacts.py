@@ -12,7 +12,9 @@ sys.path.insert(0, str(REPO_ROOT))
 import echonull  # noqa: E402
 
 
-def test_orchestrator_two_runs_artifacts_and_manifest(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+def test_orchestrator_two_runs_artifacts_and_manifest(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
     # Run everything inside a temp working dir because write_manifest also writes ./manifest.json
     monkeypatch.chdir(tmp_path)
 
@@ -37,8 +39,10 @@ def test_orchestrator_two_runs_artifacts_and_manifest(tmp_path: Path, monkeypatc
     viz_path = orch.generate_viz(results)  # should be None because enable_viz=False
     artifact_paths = orch.save_artifacts(results, overview)
 
-    manifest = echonull.build_manifest(results, overview, Path(params["output_base"]), artifact_paths, viz_path)
-    echonull.write_manifest(manifest, Path(params["output_base"]))
+    manifest = echonull.build_manifest(
+        results, overview, Path(str(params["output_base"])), artifact_paths, viz_path
+    )
+    echonull.write_manifest(manifest, Path(str(params["output_base"])))
 
     # Basic outputs exist
     assert artifact_paths["overview"].exists()
@@ -53,9 +57,18 @@ def test_orchestrator_two_runs_artifacts_and_manifest(tmp_path: Path, monkeypatc
     assert len(root_manifest["runs"]) == 2
 
     # Sha256 coherence
-    assert echonull.compute_sha256(Path(root_manifest["overview"]["path"])) == root_manifest["overview"]["sha256"]
-    assert echonull.compute_sha256(Path(root_manifest["run_summary"]["path"])) == root_manifest["run_summary"]["sha256"]
-    assert echonull.compute_sha256(Path(root_manifest["zip"]["path"])) == root_manifest["zip"]["sha256"]
+    assert (
+        echonull.compute_sha256(Path(root_manifest["overview"]["path"]))
+        == root_manifest["overview"]["sha256"]
+    )
+    assert (
+        echonull.compute_sha256(Path(root_manifest["run_summary"]["path"]))
+        == root_manifest["run_summary"]["sha256"]
+    )
+    assert (
+        echonull.compute_sha256(Path(root_manifest["zip"]["path"]))
+        == root_manifest["zip"]["sha256"]
+    )
 
     # Zip contains the two run folders
     with zipfile.ZipFile(Path(root_manifest["zip"]["path"]), "r") as zf:
