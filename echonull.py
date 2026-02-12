@@ -43,28 +43,36 @@ import pandas as pd
 
 from typing import Any as _Any
 
-plt: _Any | None = None
-nn: _Any | None = None
-torch: _Any | None = None
-tqdm: _Any | None = None
-
-# Optionnels
-try:
-    import matplotlib.pyplot as plt
-except Exception:  # pragma: no cover
-    plt = None
+# Optional dependencies. We bind imports to internal names first and then
+# expose stable public variables to avoid mypy "no-redef" errors.
+plt: _Any | None
+torch: _Any | None
+torch_nn: _Any | None
+nn: _Any | None
+tqdm: _Any | None
 
 try:
-    import torch
-    import torch.nn as nn
+    import matplotlib.pyplot as _plt  # type: ignore
 except Exception:  # pragma: no cover
-    torch = None
-    nn = None
+    _plt = None
+plt = _plt
 
 try:
-    from tqdm import tqdm
+    import torch as _torch  # type: ignore
+    import torch.nn as _torch_nn  # type: ignore
 except Exception:  # pragma: no cover
-    tqdm = None
+    _torch = None
+    _torch_nn = None
+torch = _torch
+torch_nn = _torch_nn
+# Backward compatible alias used elsewhere in the code.
+nn = _torch_nn
+
+try:
+    from tqdm import tqdm as _tqdm  # type: ignore
+except Exception:  # pragma: no cover
+    _tqdm = None
+tqdm = _tqdm
 
 try:
     import networkx as nx
@@ -86,21 +94,20 @@ except Exception:  # pragma: no cover
 # Torch optional: define a local autoencoder class only if torch is available.
 # We keep typing permissive because torch is an optional dependency.
 DenoisingAutoencoder: _Any = None
-if torch is not None and nn is not None:
-    _nn = cast(_Any, nn)
+if torch is not None and _torch_nn is not None:
 
-    class _DenoisingAutoencoder(_nn.Module):
+    class _DenoisingAutoencoder(_torch_nn.Module):  # type: ignore[attr-defined]
         def __init__(self, input_size: int = 50) -> None:
             super().__init__()
-            self.encoder = _nn.Sequential(
-                _nn.Linear(input_size, 32),
-                _nn.ReLU(),
-                _nn.Linear(32, 16),
+            self.encoder = _torch_nn.Sequential(  # type: ignore[attr-defined]
+                _torch_nn.Linear(input_size, 32),  # type: ignore[attr-defined]
+                _torch_nn.ReLU(),  # type: ignore[attr-defined]
+                _torch_nn.Linear(32, 16),  # type: ignore[attr-defined]
             )
-            self.decoder = _nn.Sequential(
-                _nn.Linear(16, 32),
-                _nn.ReLU(),
-                _nn.Linear(32, input_size),
+            self.decoder = _torch_nn.Sequential(  # type: ignore[attr-defined]
+                _torch_nn.Linear(16, 32),  # type: ignore[attr-defined]
+                _torch_nn.ReLU(),  # type: ignore[attr-defined]
+                _torch_nn.Linear(32, input_size),  # type: ignore[attr-defined]
             )
 
         def forward(self, x: _Any) -> _Any:
