@@ -1052,12 +1052,16 @@ class EchoNullOrchestrator:
             if len(recent_scores) < early_window:
                 return False
             cur_mean = float(np.mean(recent_scores))
-            cur_std = float(np.std(recent_scores, ddof=1)) if len(recent_scores) > 1 else 0.0
+            cur_std = (
+                float(np.std(recent_scores, ddof=1)) if len(recent_scores) > 1 else 0.0
+            )
             if prev_win_mean is None or prev_win_std is None:
                 prev_win_mean, prev_win_std = cur_mean, cur_std
                 stable_windows = 0
                 return False
-            if (abs(cur_mean - prev_win_mean) <= early_eps) and (abs(cur_std - prev_win_std) <= early_eps):
+            if (abs(cur_mean - prev_win_mean) <= early_eps) and (
+                abs(cur_std - prev_win_std) <= early_eps
+            ):
                 stable_windows += 1
             else:
                 stable_windows = 0
@@ -1071,8 +1075,13 @@ class EchoNullOrchestrator:
                 with Client(cluster) as client:
                     next_id = 1
                     while next_id <= runs_target and not triggered:
-                        batch_ids = list(range(next_id, min(runs_target + 1, next_id + chunk_size)))
-                        futures = [client.submit(process_run_worker, i, self.params) for i in batch_ids]
+                        batch_ids = list(
+                            range(next_id, min(runs_target + 1, next_id + chunk_size))
+                        )
+                        futures = [
+                            client.submit(process_run_worker, i, self.params)
+                            for i in batch_ids
+                        ]
                         batch = client.gather(futures)
                         _consume_results(batch)
                         triggered = _check_early_stop()
@@ -1082,14 +1091,23 @@ class EchoNullOrchestrator:
             with ProcessPoolExecutor(max_workers=workers) as executor:
                 next_id = 1
                 while next_id <= runs_target and not triggered:
-                    batch_ids = list(range(next_id, min(runs_target + 1, next_id + chunk_size)))
-                    futures = [executor.submit(process_run_worker, i, self.params) for i in batch_ids]
+                    batch_ids = list(
+                        range(next_id, min(runs_target + 1, next_id + chunk_size))
+                    )
+                    futures = [
+                        executor.submit(process_run_worker, i, self.params)
+                        for i in batch_ids
+                    ]
                     if tqdm is None:
                         batch = [f.result() for f in as_completed(futures)]
                     else:
                         batch = [
                             f.result()
-                            for f in tqdm(as_completed(futures), total=len(futures), desc="Runs")
+                            for f in tqdm(
+                                as_completed(futures),
+                                total=len(futures),
+                                desc="Runs",
+                            )
                         ]
                     _consume_results(batch)
                     triggered = _check_early_stop()
@@ -1156,7 +1174,9 @@ class EchoNullOrchestrator:
         logger.info(f"Viz generated: {viz_path}")
         return viz_path
 
-    def save_artifacts(self, results: List[RunResult], overview: Dict[str, Any]) -> Dict[str, Path]:
+    def save_artifacts(
+        self, results: List[RunResult], overview: Dict[str, Any]
+    ) -> Dict[str, Path]:
         self.output_base.mkdir(parents=True, exist_ok=True)
 
         overview_path = self.output_base / "overview.json"
@@ -1219,7 +1239,9 @@ class EchoNullOrchestrator:
                         "graph_missing_edge_ratio": float(
                             getattr(ntr, "graph_missing_edge_ratio", 0.0)
                         ),
-                        "graph_isolated_ratio": float(getattr(ntr, "graph_isolated_ratio", 0.0)),
+                        "graph_isolated_ratio": float(
+                            getattr(ntr, "graph_isolated_ratio", 0.0)
+                        ),
                     }
                 )
             pd.DataFrame(null_rows).to_csv(null_path, index=False)

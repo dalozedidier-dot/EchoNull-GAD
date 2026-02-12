@@ -14,6 +14,7 @@ References (to implement later):
 - CoLA (Contrastive Self-Supervised Learning for Anomaly Detection)
 - GCNAE (GCN Autoencoder variants)
 """
+
 from __future__ import annotations
 
 

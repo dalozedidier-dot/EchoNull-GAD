@@ -113,4 +113,3 @@ python benchmarks/public_benchmark.py --dataset cora --variants 200 --out-dir be
 ```
 
 Outputs: `bench_out/scores.csv` and `bench_out/benchmark_results.json`.
-
