@@ -113,3 +113,8 @@ python benchmarks/public_benchmark.py --dataset cora --variants 200 --out-dir be
 ```
 
 Outputs: `bench_out/scores.csv` and `bench_out/benchmark_results.json`.
+
+
+## Workflows
+
+Le workflow de template `blank.yml` est volontairement désactivé (workflow_dispatch uniquement). Les workflows actifs sont `tests` (ci.yml), `test-scaling*` et `Release`.
