@@ -7,28 +7,29 @@ on:
   workflow_dispatch:
     inputs:
       tag_name:
-        description: "Tag name to release (e.g. v0.2.0). If it does not exist, it will be created on target_commitish."
+        description: "Tag to release (e.g. v0.2.0)"
         required: true
-        default: "v0.2.0"
+        type: string
       target_commitish:
-        description: "Branch or SHA to tag when creating a release via workflow_dispatch."
+        description: "Branch or SHA to tag (used only if tag does not exist)"
         required: false
         default: "main"
+        type: string
       draft:
         description: "Create a draft release"
-        type: boolean
         required: false
         default: false
+        type: boolean
       prerelease:
         description: "Mark as prerelease"
-        type: boolean
         required: false
         default: false
-      generate_notes:
-        description: "Auto-generate release notes"
         type: boolean
+      generate_release_notes:
+        description: "Auto-generate GitHub release notes"
         required: false
         default: true
+        type: boolean
 
 permissions:
   contents: write
@@ -37,30 +38,86 @@ jobs:
   build-and-release:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-      - uses: actions/setup-python@v5
+      - name: Setup Python
+        uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-          cache: "pip"
+          cache: pip
 
       - name: Install build tooling
         run: |
-          python -m pip install --upgrade pip
+          python -m pip install -U pip
           python -m pip install build
 
-      - name: Build dist
+      - name: Determine tag + target
+        id: ref
         run: |
-          python -m build
-          ls -la dist
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "tag=${{ inputs.tag_name }}" >> "$GITHUB_OUTPUT"
+            echo "target=${{ inputs.target_commitish }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+            echo "target=${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
+          fi
 
-      - name: GitHub Release
+      - name: Release flags
+        id: flags
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "draft=${{ inputs.draft }}" >> "$GITHUB_OUTPUT"
+            echo "prerelease=${{ inputs.prerelease }}" >> "$GITHUB_OUTPUT"
+            echo "notes=${{ inputs.generate_release_notes }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "draft=false" >> "$GITHUB_OUTPUT"
+            echo "prerelease=false" >> "$GITHUB_OUTPUT"
+            echo "notes=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Ensure tag exists (workflow_dispatch)
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const tag = '${{ steps.ref.outputs.tag }}';
+            const target = '${{ steps.ref.outputs.target }}';
+            const ref = `tags/${tag}`;
+
+            try {
+              await github.rest.git.getRef({ owner, repo, ref });
+              core.info(`Tag ${tag} already exists`);
+            } catch (e) {
+              core.info(`Creating tag ${tag} at ${target}`);
+              const { data: commit } = await github.rest.repos.getCommit({ owner, repo, ref: target });
+              await github.rest.git.createRef({
+                owner,
+                repo,
+                ref: `refs/tags/${tag}`,
+                sha: commit.sha,
+              });
+            }
+
+      - name: Build dist
+        run: python -m build
+
+      - name: Upload dist artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/*
+
+      - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ github.event_name == 'workflow_dispatch' && inputs.tag_name || github.ref_name }}
-          target_commitish: ${{ github.event_name == 'workflow_dispatch' && inputs.target_commitish || github.sha }}
-          draft: ${{ github.event_name == 'workflow_dispatch' && inputs.draft || false }}
-          prerelease: ${{ github.event_name == 'workflow_dispatch' && inputs.prerelease || false }}
-          generate_release_notes: ${{ github.event_name == 'workflow_dispatch' && inputs.generate_notes || true }}
+          tag_name: ${{ steps.ref.outputs.tag }}
+          draft: ${{ steps.flags.outputs.draft }}
+          prerelease: ${{ steps.flags.outputs.prerelease }}
+          generate_release_notes: ${{ steps.flags.outputs.notes }}
           files: |
             dist/*
