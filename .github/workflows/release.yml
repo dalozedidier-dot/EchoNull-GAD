@@ -5,6 +5,30 @@ on:
     tags:
       - "v*"
   workflow_dispatch:
+    inputs:
+      tag_name:
+        description: "Tag name to release (e.g. v0.2.0). If it does not exist, it will be created on target_commitish."
+        required: true
+        default: "v0.2.0"
+      target_commitish:
+        description: "Branch or SHA to tag when creating a release via workflow_dispatch."
+        required: false
+        default: "main"
+      draft:
+        description: "Create a draft release"
+        type: boolean
+        required: false
+        default: false
+      prerelease:
+        description: "Mark as prerelease"
+        type: boolean
+        required: false
+        default: false
+      generate_notes:
+        description: "Auto-generate release notes"
+        type: boolean
+        required: false
+        default: true
 
 permissions:
   contents: write
@@ -14,21 +38,29 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
           cache: "pip"
+
       - name: Install build tooling
         run: |
           python -m pip install --upgrade pip
           python -m pip install build
+
       - name: Build dist
         run: |
           python -m build
           ls -la dist
+
       - name: GitHub Release
-        if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ github.event_name == 'workflow_dispatch' && inputs.tag_name || github.ref_name }}
+          target_commitish: ${{ github.event_name == 'workflow_dispatch' && inputs.target_commitish || github.sha }}
+          draft: ${{ github.event_name == 'workflow_dispatch' && inputs.draft || false }}
+          prerelease: ${{ github.event_name == 'workflow_dispatch' && inputs.prerelease || false }}
+          generate_release_notes: ${{ github.event_name == 'workflow_dispatch' && inputs.generate_notes || true }}
           files: |
             dist/*
