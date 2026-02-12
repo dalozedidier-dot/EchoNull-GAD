@@ -19,12 +19,18 @@ from __future__ import annotations
 
 
 def dominant_score(*args, **kwargs) -> float:  # pragma: no cover
-    raise NotImplementedError("DOMINANT baseline not implemented yet. Install extras + implement.")
+    raise NotImplementedError(
+        "DOMINANT baseline not implemented yet. Install extras + implement."
+    )
 
 
 def cola_score(*args, **kwargs) -> float:  # pragma: no cover
-    raise NotImplementedError("CoLA baseline not implemented yet. Install extras + implement.")
+    raise NotImplementedError(
+        "CoLA baseline not implemented yet. Install extras + implement."
+    )
 
 
 def gcnae_score(*args, **kwargs) -> float:  # pragma: no cover
-    raise NotImplementedError("GCNAE baseline not implemented yet. Install extras + implement.")
+    raise NotImplementedError(
+        "GCNAE baseline not implemented yet. Install extras + implement."
+    )

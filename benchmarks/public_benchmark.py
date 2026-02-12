@@ -212,9 +212,7 @@ def score_variant(
     mad = max(1e-6, isolated_ratio * 5.0e-3)
 
     nulltrace = {"abs_p99": float(p99), "abs_mad": float(mad)}
-    voidmark = {
-        "anomaly_count": int(silent_nodes > 0) + int(missing_edge_ratio > 0.05)
-    }
+    voidmark = {"anomaly_count": int(silent_nodes > 0) + int(missing_edge_ratio > 0.05)}
 
     score = echonull.compute_anomaly_score(
         rift_by_thr, nulltrace, voidmark, score_weights=(0.4, 0.4, 0.2)

@@ -1348,9 +1348,7 @@ def build_manifest(
         if artifact_paths.get("runs_jsonl")
         else ""
     )
-    agg_sha = (
-        compute_sha256(artifact_paths["agg"]) if artifact_paths.get("agg") else ""
-    )
+    agg_sha = compute_sha256(artifact_paths["agg"]) if artifact_paths.get("agg") else ""
 
     viz_sha = compute_sha256(viz_path) if viz_path and viz_path.exists() else ""
 
