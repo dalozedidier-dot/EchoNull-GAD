@@ -17,37 +17,103 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 180
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-      - uses: actions/setup-python@v5
+      - name: Setup Python 3.12
+        uses: actions/setup-python@v5
         with:
           python-version: "3.12"
           cache: "pip"
 
-      - name: Install dependencies (robust)
+      - name: Install dependencies (robust, prefer extras)
         shell: bash
         run: |
+          set -e
           python -m pip install --upgrade pip
-          if ! pip install -r requirements.txt --retries 3 --timeout 60; then
-            pip install numpy pandas matplotlib networkx tqdm --retries 3 --timeout 60
+          echo "Trying editable install with extras: viz,ml,scale,perf"
+          if ! pip install -e ".[viz,ml,scale,perf]" --retries 3 --timeout 60; then
+            echo "Extras install failed, falling back to core+viz"
+            pip install -e ".[viz]" --retries 3 --timeout 60
           fi
+          python -m pip freeze | sed -n '1,200p'
 
-      - name: Run EchoNull (workers=4)
+      - name: Prepare folders
+        shell: bash
+        run: |
+          mkdir -p _echonull_out
+          echo "Disk before run"
+          df -h
+
+      - name: Run EchoNull (workers=4, retry 3x)
+        id: run_echonull
         continue-on-error: true
         shell: bash
         env:
           PYTHONUNBUFFERED: "1"
         run: |
-          python echonull.py ${{ inputs.mode }}             --runs ${{ inputs.runs }}             --thresholds 0.25,0.5,0.7,0.8             --seed-base 1000             --workers 4             --enable-viz || true
+          set +e
+          out="_echonull_out/sweep_${{ github.run_id }}_${{ inputs.mode }}_${{ inputs.runs }}_low"
+          success=0
+          for attempt in 1 2 3; do
+            echo "Attempt ${attempt}/3"
+            python echonull.py ${{ inputs.mode }}               --runs ${{ inputs.runs }}               --thresholds 0.25,0.5,0.7,0.8               --seed-base 1000               --workers 4               --enable-viz               --output-base "${out}"
+            code=$?
+            echo "Exit code: ${code}"
+            if [ "${code}" -eq 0 ]; then
+              success=1
+              break
+            fi
+            sleep 10
+          done
+          if [ "${success}" -ne 1 ]; then
+            echo "All attempts failed."
+            exit 1
+          fi
+          exit 0
 
-      - name: Upload results
+      - name: Quick stats (sizes, zip, counts)
+        if: always()
+        shell: bash
+        run: |
+          echo "Disk after run"
+          df -h || true
+          echo "Output tree (top)"
+          find _echonull_out -maxdepth 4 -type f | sed -n '1,200p' || true
+          echo "Run folders count"
+          find _echonull_out -type d -name "run_*" | wc -l || true
+          echo "Zip files"
+          ls -lh _echonull_out/*.zip 2>/dev/null || true
+          echo "Output size"
+          du -sh _echonull_out 2>/dev/null || true
+
+      - name: Upload all results (even on failure)
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: echonull-results-low-${{ inputs.runs }}-runs-${{ inputs.mode }}
           path: |
             _echonull_out/**
-            echonull.log
             manifest.json
           if-no-files-found: warn
           retention-days: 14
+
+      - name: Show log tail (last 60 lines, if present)
+        if: always()
+        shell: bash
+        run: |
+          echo "Looking for echonull.log under _echonull_out/"
+          f=$(find _echonull_out -name "echonull.log" -type f | head -n 1)
+          if [ -n "${f}" ]; then
+            echo "Log file: ${f}"
+            tail -n 60 "${f}" || true
+          else
+            echo "No echonull.log found"
+          fi
+
+      - name: Fail workflow if run failed
+        if: steps.run_echonull.outcome == 'failure'
+        shell: bash
+        run: |
+          echo "EchoNull run step failed. Marking workflow as failed."
+          exit 1

@@ -12,21 +12,26 @@ venv/
 .mypy_cache/
 .hypothesis/
 
-# Outputs
+# Outputs (generated)
+_echonull_out/
 outputs/
 vault_test/
+manifest.json
+echonull.log
+*.zip
+
+# Coverage
+.coverage
+coverage.xml
+htmlcov/
 
 # Data
 data/
 !data/current.csv
 !data/previous_shadow.csv
-# Test fixtures remain tracked
 !tests/data/
 
 # Dev & OS
-.coverage
-coverage.xml
-htmlcov/
 mkdocs/build/
 .DS_Store
 Thumbs.db

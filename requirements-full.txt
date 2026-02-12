@@ -1,0 +1,10 @@
+# Full optional stack for EchoNull-GAD
+# Prefer installing via pip extras: pip install -e ".[viz,ml,scale,perf]"
+numpy>=1.24
+pandas>=2.0
+networkx>=3.0
+tqdm>=4.66
+matplotlib>=3.7
+torch>=2.0
+memory_profiler>=0.61
+dask[distributed]>=2024.1.0
