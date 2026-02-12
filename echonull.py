@@ -52,14 +52,14 @@ nn: _Any | None
 tqdm: _Any | None
 
 try:
-    import matplotlib.pyplot as _plt  # type: ignore
+    import matplotlib.pyplot as _plt
 except Exception:  # pragma: no cover
     _plt = None
 plt = _plt
 
 try:
-    import torch as _torch  # type: ignore
-    import torch.nn as _torch_nn  # type: ignore
+    import torch as _torch
+    import torch.nn as _torch_nn
 except Exception:  # pragma: no cover
     _torch = None
     _torch_nn = None
@@ -69,7 +69,7 @@ torch_nn = _torch_nn
 nn = _torch_nn
 
 try:
-    from tqdm import tqdm as _tqdm  # type: ignore
+    from tqdm import tqdm as _tqdm
 except Exception:  # pragma: no cover
     _tqdm = None
 tqdm = _tqdm
@@ -96,18 +96,18 @@ except Exception:  # pragma: no cover
 DenoisingAutoencoder: _Any = None
 if torch is not None and _torch_nn is not None:
 
-    class _DenoisingAutoencoder(_torch_nn.Module):  # type: ignore[attr-defined]
+    class _DenoisingAutoencoder(_torch_nn.Module):
         def __init__(self, input_size: int = 50) -> None:
             super().__init__()
-            self.encoder = _torch_nn.Sequential(  # type: ignore[attr-defined]
-                _torch_nn.Linear(input_size, 32),  # type: ignore[attr-defined]
-                _torch_nn.ReLU(),  # type: ignore[attr-defined]
-                _torch_nn.Linear(32, 16),  # type: ignore[attr-defined]
+            self.encoder = _torch_nn.Sequential(
+                _torch_nn.Linear(input_size, 32),
+                _torch_nn.ReLU(),
+                _torch_nn.Linear(32, 16),
             )
-            self.decoder = _torch_nn.Sequential(  # type: ignore[attr-defined]
-                _torch_nn.Linear(16, 32),  # type: ignore[attr-defined]
-                _torch_nn.ReLU(),  # type: ignore[attr-defined]
-                _torch_nn.Linear(32, input_size),  # type: ignore[attr-defined]
+            self.decoder = _torch_nn.Sequential(
+                _torch_nn.Linear(16, 32),
+                _torch_nn.ReLU(),
+                _torch_nn.Linear(32, input_size),
             )
 
         def forward(self, x: _Any) -> _Any:
