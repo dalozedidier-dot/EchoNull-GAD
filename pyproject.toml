@@ -1,6 +1,6 @@
 [project]
 name = "echonull"
-version = "0.1.0"
+version = "0.2.0"
 description = "EchoNull - CI-native graph and null-trace anomaly detection via massive sweeps"
 requires-python = ">=3.10"
 readme = "README.md"
@@ -20,6 +20,14 @@ scale = ["dask[distributed]>=2024.1.0"]
 perf = ["memory_profiler>=0.61"]
 dev = ["pytest>=8", "ruff>=0.5", "mypy>=1.10"]
 
+pyg = [
+  "torch>=2.0",
+  "torch_geometric>=2.0",
+]
+baselines = [
+  "torch>=2.0",
+  "torch_geometric>=2.0",
+]
 [project.scripts]
 echonull = "echonull:main"
 

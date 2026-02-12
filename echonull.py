@@ -4,7 +4,7 @@
 EchoNull - Lightweight CI-native framework for graph and null-trace anomaly detection
 via massive parameter sweeps.
 
-Version: 0.1.0 (2026 Pushed Edition)
+Version: 0.2.0 (2026 Pushed Edition)
 
 CLI:
 - sweep: exécute N runs, génère artefacts, overview, manifest, zip, viz optionnelle
@@ -22,6 +22,7 @@ Dépendances optionnelles:
 from __future__ import annotations
 
 import argparse
+import csv
 import datetime
 import hashlib
 import json
@@ -155,7 +156,7 @@ def ensure_file_logging(log_path: Path) -> None:
 
 BASE_OUTPUT_DIR = Path("_echonull_out")
 TIMESTAMP = datetime.datetime.utcnow().strftime("%Y%m%dT%H%M%S")
-VERSION = "0.1.0"
+VERSION = "0.2.0"
 
 
 @dataclass
@@ -833,43 +834,272 @@ class EchoNullOrchestrator:
 
     @perf_timer
     def run_sweep(self) -> List[RunResult]:
-        runs = int(self.params["runs"])
+        runs_target = int(self.params["runs"])
         workers = int(self.params["workers"])
+        chunk_size = int(self.params.get("chunk_size") or max(1, workers * 2))
+
+        max_detailed = int(self.params.get("manifest_max_detailed_runs", 200))
+        early_stop = bool(self.params.get("early_stop", False))
+        early_min_runs = int(self.params.get("early_min_runs", 200))
+        early_window = int(self.params.get("early_window", 50))
+        early_eps = float(self.params.get("early_eps", 0.005))
+        early_patience = int(self.params.get("early_patience", 3))
 
         logger.info(
-            f"EchoNull Sweep | runs={runs} | workers={workers} | "
-            f"ML={self.params.get('enable_ml')} | "
-            f"Viz={self.params.get('enable_viz')} | "
-            f"Dask={self.params.get('use_dask')}"
+            f"EchoNull Sweep | runs={runs_target} | workers={workers} | chunk={chunk_size} | "
+            f"EarlyStop={early_stop} | ML={self.params.get('enable_ml')} | "
+            f"Viz={self.params.get('enable_viz')} | Dask={self.params.get('use_dask')}"
         )
 
         self.output_base.mkdir(parents=True, exist_ok=True)
+
+        # Streaming outputs (memory stable for 500–1000 runs)
+        runs_jsonl_path = self.output_base / "runs.jsonl"
+        run_summary_path = self.output_base / "run_summary.csv"
+        rift_path = self.output_base / "riftlens_by_threshold.csv"
+        null_path = self.output_base / "nulltrace.csv"
+        void_path = self.output_base / "voidmark.csv"
+        agg_path = self.output_base / "agg.json"
+
+        run_summary_fields: Optional[List[str]] = None
+        rift_fields = [
+            "run_id",
+            "seed",
+            "threshold",
+            "n_nodes",
+            "n_edges",
+            "base_edges",
+            "edge_keep_ratio",
+            "jaccard",
+            "silent_nodes",
+            "anomaly_flag",
+            "path_report",
+        ]
+        null_fields = [
+            "run_id",
+            "seed",
+            "n_deltas",
+            "abs_p50",
+            "abs_p90",
+            "abs_p99",
+            "abs_mad",
+            "abs_max",
+            "denoised_mean",
+            "graph_missing_edge_ratio",
+            "graph_isolated_ratio",
+        ]
+        void_fields = ["run_id", "seed", "marks_files_count_median", "anomaly_count"]
+
+        def _init_csv(path: Path, fields: List[str]) -> None:
+            if path.exists():
+                return
+            path.parent.mkdir(parents=True, exist_ok=True)
+            with open(path, "w", newline="", encoding="utf-8") as f:
+                w = csv.DictWriter(f, fieldnames=fields)
+                w.writeheader()
+
+        def _append_row(path: Path, fields: List[str], row: Dict[str, Any]) -> None:
+            with open(path, "a", newline="", encoding="utf-8") as f:
+                w = csv.DictWriter(f, fieldnames=fields)
+                w.writerow({k: row.get(k, "") for k in fields})
+
+        _init_csv(rift_path, rift_fields)
+        _init_csv(null_path, null_fields)
+        _init_csv(void_path, void_fields)
+
+        # Welford running stats for gad_score
+        n = 0
+        mean = 0.0
+        m2 = 0.0
+        min_v = float("inf")
+        max_v = float("-inf")
+
+        recent_scores: List[float] = []
+        prev_win_mean: Optional[float] = None
+        prev_win_std: Optional[float] = None
+        stable_windows = 0
+
+        def _update_stats(x: float) -> None:
+            nonlocal n, mean, m2, min_v, max_v
+            n += 1
+            delta = x - mean
+            mean += delta / float(n)
+            m2 += delta * (x - mean)
+            min_v = min(min_v, x)
+            max_v = max(max_v, x)
+
+        def _std() -> float:
+            if n <= 1:
+                return 0.0
+            return float(math.sqrt(m2 / float(n - 1)))
+
+        def _write_agg(processed: int, triggered: bool) -> None:
+            payload = {
+                "runs_target": int(runs_target),
+                "runs_processed": int(processed),
+                "gad_score": {
+                    "n": int(n),
+                    "mean": float(mean if n else 0.0),
+                    "std": float(_std()),
+                    "min": float(min_v if math.isfinite(min_v) else 0.0),
+                    "max": float(max_v if math.isfinite(max_v) else 0.0),
+                },
+                "early_stop": {
+                    "enabled": bool(early_stop),
+                    "triggered": bool(triggered),
+                    "min_runs": int(early_min_runs),
+                    "window": int(early_window),
+                    "eps": float(early_eps),
+                    "patience": int(early_patience),
+                    "stable_windows": int(stable_windows),
+                },
+            }
+            with open(agg_path, "w", encoding="utf-8") as f:
+                json.dump(payload, f, indent=2)
+
+        detailed: List[RunResult] = []
+
+        processed = 0
+        triggered = False
+
+        with open(runs_jsonl_path, "w", encoding="utf-8") as _:
+            pass
+
+        def _consume_results(batch: List[RunResult]) -> None:
+            nonlocal processed, run_summary_fields
+            batch = sorted(batch, key=lambda r: r.run_id)
+            for r in batch:
+                processed += 1
+
+                if len(detailed) < max_detailed:
+                    detailed.append(r)
+
+                with open(runs_jsonl_path, "a", encoding="utf-8") as f:
+                    f.write(json.dumps(r.to_dict(), ensure_ascii=False) + "\n")
+
+                row_flat = flatten_run_summary(r)
+                if run_summary_fields is None:
+                    run_summary_fields = list(row_flat.keys())
+                    _init_csv(run_summary_path, run_summary_fields)
+                _append_row(run_summary_path, run_summary_fields, row_flat)
+
+                for rr in r.riftlens:
+                    _append_row(
+                        rift_path,
+                        rift_fields,
+                        {
+                            "run_id": int(r.run_id),
+                            "seed": int(r.seed),
+                            "threshold": float(rr.threshold),
+                            "n_nodes": int(rr.n_nodes),
+                            "n_edges": int(rr.n_edges),
+                            "base_edges": int(rr.base_edges),
+                            "edge_keep_ratio": float(rr.edge_keep_ratio),
+                            "jaccard": float(rr.jaccard),
+                            "silent_nodes": int(rr.silent_nodes),
+                            "anomaly_flag": bool(rr.anomaly_flag),
+                            "path_report": str(rr.path_report),
+                        },
+                    )
+
+                ntr = r.nulltrace
+                _append_row(
+                    null_path,
+                    null_fields,
+                    {
+                        "run_id": int(r.run_id),
+                        "seed": int(r.seed),
+                        "n_deltas": int(ntr.n_deltas),
+                        "abs_p50": float(ntr.abs_p50),
+                        "abs_p90": float(ntr.abs_p90),
+                        "abs_p99": float(ntr.abs_p99),
+                        "abs_mad": float(ntr.abs_mad),
+                        "abs_max": float(ntr.abs_max),
+                        "denoised_mean": float(ntr.denoised_mean),
+                        "graph_missing_edge_ratio": float(
+                            getattr(ntr, "graph_missing_edge_ratio", 0.0)
+                        ),
+                        "graph_isolated_ratio": float(
+                            getattr(ntr, "graph_isolated_ratio", 0.0)
+                        ),
+                    },
+                )
+
+                v = r.voidmark
+                _append_row(
+                    void_path,
+                    void_fields,
+                    {
+                        "run_id": int(r.run_id),
+                        "seed": int(r.seed),
+                        "marks_files_count_median": int(v.marks_files_count_median),
+                        "anomaly_count": int(v.anomaly_count),
+                    },
+                )
+
+                score = float(r.gad_score)
+                _update_stats(score)
+                recent_scores.append(score)
+                if len(recent_scores) > early_window:
+                    recent_scores.pop(0)
+
+        def _check_early_stop() -> bool:
+            nonlocal prev_win_mean, prev_win_std, stable_windows
+            if not early_stop:
+                return False
+            if processed < early_min_runs:
+                return False
+            if len(recent_scores) < early_window:
+                return False
+            cur_mean = float(np.mean(recent_scores))
+            cur_std = float(np.std(recent_scores, ddof=1)) if len(recent_scores) > 1 else 0.0
+            if prev_win_mean is None or prev_win_std is None:
+                prev_win_mean, prev_win_std = cur_mean, cur_std
+                stable_windows = 0
+                return False
+            if (abs(cur_mean - prev_win_mean) <= early_eps) and (abs(cur_std - prev_win_std) <= early_eps):
+                stable_windows += 1
+            else:
+                stable_windows = 0
+            prev_win_mean, prev_win_std = cur_mean, cur_std
+            return stable_windows >= early_patience
 
         if self.params.get("use_dask", False):
             if LocalCluster is None or Client is None:
                 raise RuntimeError("dask[distributed] n'est pas installé.")
             with LocalCluster(n_workers=workers, threads_per_worker=1) as cluster:
                 with Client(cluster) as client:
-                    futures = [
-                        client.submit(process_run_worker, i, self.params)
-                        for i in range(1, runs + 1)
-                    ]
-                    results = client.gather(futures)
+                    next_id = 1
+                    while next_id <= runs_target and not triggered:
+                        batch_ids = list(range(next_id, min(runs_target + 1, next_id + chunk_size)))
+                        futures = [client.submit(process_run_worker, i, self.params) for i in batch_ids]
+                        batch = client.gather(futures)
+                        _consume_results(batch)
+                        triggered = _check_early_stop()
+                        _write_agg(processed, triggered)
+                        next_id += chunk_size
         else:
             with ProcessPoolExecutor(max_workers=workers) as executor:
-                futures = [
-                    executor.submit(process_run_worker, i, self.params)
-                    for i in range(1, runs + 1)
-                ]
-                if tqdm is None:
-                    results = [f.result() for f in as_completed(futures)]
-                else:
-                    results = [
-                        f.result()
-                        for f in tqdm(as_completed(futures), total=runs, desc="Runs")
-                    ]
+                next_id = 1
+                while next_id <= runs_target and not triggered:
+                    batch_ids = list(range(next_id, min(runs_target + 1, next_id + chunk_size)))
+                    futures = [executor.submit(process_run_worker, i, self.params) for i in batch_ids]
+                    if tqdm is None:
+                        batch = [f.result() for f in as_completed(futures)]
+                    else:
+                        batch = [
+                            f.result()
+                            for f in tqdm(as_completed(futures), total=len(futures), desc="Runs")
+                        ]
+                    _consume_results(batch)
+                    triggered = _check_early_stop()
+                    _write_agg(processed, triggered)
+                    next_id += chunk_size
 
-        return sorted(results, key=lambda r: r.run_id)
+        self.params["runs_effective"] = int(processed)
+        self.params["early_stop_triggered"] = bool(triggered)
+
+        return sorted(detailed, key=lambda r: r.run_id)
 
     def generate_overview(self, results: List[RunResult]) -> Dict[str, Any]:
         gad_scores = [float(r.gad_score) for r in results] or [0.0]
@@ -926,9 +1156,7 @@ class EchoNullOrchestrator:
         logger.info(f"Viz generated: {viz_path}")
         return viz_path
 
-    def save_artifacts(
-        self, results: List[RunResult], overview: Dict[str, Any]
-    ) -> Dict[str, Path]:
+    def save_artifacts(self, results: List[RunResult], overview: Dict[str, Any]) -> Dict[str, Path]:
         self.output_base.mkdir(parents=True, exist_ok=True)
 
         overview_path = self.output_base / "overview.json"
@@ -936,89 +1164,116 @@ class EchoNullOrchestrator:
             json.dump(overview, f, indent=2)
 
         env_path = self.output_base / "env.json"
-        with open(env_path, "w", encoding="utf-8") as f:
-            json.dump(collect_env_info(), f, indent=2)
+        if not env_path.exists():
+            with open(env_path, "w", encoding="utf-8") as f:
+                json.dump(collect_env_info(), f, indent=2)
 
-        # Flat, analysis-friendly summary
         run_summary_path = self.output_base / "run_summary.csv"
-        df_flat = pd.DataFrame([flatten_run_summary(r) for r in results])
-        df_flat.to_csv(run_summary_path, index=False)
-
-        # Per-module CSVs (normalized)
         rift_path = self.output_base / "riftlens_by_threshold.csv"
-        rift_rows: List[Dict[str, Any]] = []
-        for r in results:
-            for rr in r.riftlens:
-                rift_rows.append(
+        null_path = self.output_base / "nulltrace.csv"
+        void_path = self.output_base / "voidmark.csv"
+        runs_jsonl_path = self.output_base / "runs.jsonl"
+        agg_path = self.output_base / "agg.json"
+
+        # If a long sweep used streaming writers, CSVs/JSONL already exist.
+        if results and (not run_summary_path.exists()):
+            df_flat = pd.DataFrame([flatten_run_summary(r) for r in results])
+            df_flat.to_csv(run_summary_path, index=False)
+
+        if results and (not rift_path.exists()):
+            rift_rows: List[Dict[str, Any]] = []
+            for r in results:
+                for rr in r.riftlens:
+                    rift_rows.append(
+                        {
+                            "run_id": int(r.run_id),
+                            "seed": int(r.seed),
+                            "threshold": float(rr.threshold),
+                            "n_nodes": int(rr.n_nodes),
+                            "n_edges": int(rr.n_edges),
+                            "base_edges": int(rr.base_edges),
+                            "edge_keep_ratio": float(rr.edge_keep_ratio),
+                            "jaccard": float(rr.jaccard),
+                            "silent_nodes": int(rr.silent_nodes),
+                            "anomaly_flag": bool(rr.anomaly_flag),
+                            "path_report": str(rr.path_report),
+                        }
+                    )
+            pd.DataFrame(rift_rows).to_csv(rift_path, index=False)
+
+        if results and (not null_path.exists()):
+            null_rows: List[Dict[str, Any]] = []
+            for r in results:
+                ntr = r.nulltrace
+                null_rows.append(
                     {
                         "run_id": int(r.run_id),
                         "seed": int(r.seed),
-                        "threshold": float(rr.threshold),
-                        "n_nodes": int(rr.n_nodes),
-                        "n_edges": int(rr.n_edges),
-                        "base_edges": int(rr.base_edges),
-                        "edge_keep_ratio": float(rr.edge_keep_ratio),
-                        "jaccard": float(rr.jaccard),
-                        "silent_nodes": int(rr.silent_nodes),
-                        "anomaly_flag": bool(rr.anomaly_flag),
-                        "path_report": str(rr.path_report),
+                        "n_deltas": int(ntr.n_deltas),
+                        "abs_p50": float(ntr.abs_p50),
+                        "abs_p90": float(ntr.abs_p90),
+                        "abs_p99": float(ntr.abs_p99),
+                        "abs_mad": float(ntr.abs_mad),
+                        "abs_max": float(ntr.abs_max),
+                        "denoised_mean": float(ntr.denoised_mean),
+                        "graph_missing_edge_ratio": float(
+                            getattr(ntr, "graph_missing_edge_ratio", 0.0)
+                        ),
+                        "graph_isolated_ratio": float(getattr(ntr, "graph_isolated_ratio", 0.0)),
                     }
                 )
-        pd.DataFrame(rift_rows).to_csv(rift_path, index=False)
+            pd.DataFrame(null_rows).to_csv(null_path, index=False)
 
-        null_path = self.output_base / "nulltrace.csv"
-        null_rows = []
-        for r in results:
-            n = r.nulltrace
-            null_rows.append(
-                {
-                    "run_id": int(r.run_id),
-                    "seed": int(r.seed),
-                    "n_deltas": int(n.n_deltas),
-                    "abs_p50": float(n.abs_p50),
-                    "abs_p90": float(n.abs_p90),
-                    "abs_p99": float(n.abs_p99),
-                    "abs_mad": float(n.abs_mad),
-                    "abs_max": float(n.abs_max),
-                    "denoised_mean": float(n.denoised_mean),
-                    "graph_missing_edge_ratio": float(
-                        getattr(n, "graph_missing_edge_ratio", 0.0)
-                    ),
-                    "graph_isolated_ratio": float(
-                        getattr(n, "graph_isolated_ratio", 0.0)
-                    ),
-                }
-            )
-        pd.DataFrame(null_rows).to_csv(null_path, index=False)
-
-        void_path = self.output_base / "voidmark.csv"
-        void_rows = []
-        for r in results:
-            v = r.voidmark
-            void_rows.append(
-                {
-                    "run_id": int(r.run_id),
-                    "seed": int(r.seed),
-                    "marks_files_count_median": int(v.marks_files_count_median),
-                    "anomaly_count": int(v.anomaly_count),
-                }
-            )
-        pd.DataFrame(void_rows).to_csv(void_path, index=False)
-
-        # Detailed per-run payload in JSONL (useful for very large sweeps)
-        runs_jsonl_path = self.output_base / "runs.jsonl"
-        with open(runs_jsonl_path, "w", encoding="utf-8") as f:
+        if results and (not void_path.exists()):
+            void_rows: List[Dict[str, Any]] = []
             for r in results:
-                f.write(json.dumps(r.to_dict(), ensure_ascii=False) + "\n")
+                v = r.voidmark
+                void_rows.append(
+                    {
+                        "run_id": int(r.run_id),
+                        "seed": int(r.seed),
+                        "marks_files_count_median": int(v.marks_files_count_median),
+                        "anomaly_count": int(v.anomaly_count),
+                    }
+                )
+            pd.DataFrame(void_rows).to_csv(void_path, index=False)
 
-        zip_path = self.output_base.with_suffix(".zip")
-        with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_LZMA) as zf:
-            for file in self.output_base.rglob("*"):
-                if file.is_file():
-                    zf.write(file, file.relative_to(self.output_base.parent))
+        if results and (not runs_jsonl_path.exists()):
+            with open(runs_jsonl_path, "w", encoding="utf-8") as f:
+                for r in results:
+                    f.write(json.dumps(r.to_dict(), ensure_ascii=False) + "\n")
 
-        logger.info(f"Artefacts saved: {zip_path}")
-        return {
+        if not agg_path.exists():
+            scores = [float(r.gad_score) for r in results] if results else []
+            payload = {
+                "runs_target": int(self.params.get("runs", len(scores))),
+                "runs_processed": int(len(scores)),
+                "gad_score": {
+                    "n": int(len(scores)),
+                    "mean": float(np.mean(scores)) if scores else 0.0,
+                    "std": float(np.std(scores, ddof=1)) if len(scores) > 1 else 0.0,
+                    "min": float(min(scores)) if scores else 0.0,
+                    "max": float(max(scores)) if scores else 0.0,
+                },
+                "early_stop": {
+                    "enabled": bool(self.params.get("early_stop", False)),
+                    "triggered": bool(self.params.get("early_stop_triggered", False)),
+                },
+            }
+            with open(agg_path, "w", encoding="utf-8") as f:
+                json.dump(payload, f, indent=2)
+
+        zip_path = self.output_base / "echonull_outputs.zip"
+        with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+            for p in sorted(self.output_base.rglob("*")):
+                if p.is_file():
+                    if p == zip_path:
+                        continue
+                    arc = Path(self.output_base.name) / p.relative_to(self.output_base)
+                    zf.write(p, arcname=str(arc))
+
+        artifact_paths: Dict[str, Path] = {
+            "zip": zip_path,
             "overview": overview_path,
             "env": env_path,
             "run_summary": run_summary_path,
@@ -1026,8 +1281,9 @@ class EchoNullOrchestrator:
             "nulltrace": null_path,
             "voidmark": void_path,
             "runs_jsonl": runs_jsonl_path,
-            "zip": zip_path,
+            "agg": agg_path,
         }
+        return artifact_paths
 
 
 def build_manifest(
@@ -1070,6 +1326,10 @@ def build_manifest(
         if artifact_paths.get("runs_jsonl")
         else ""
     )
+    agg_sha = (
+        compute_sha256(artifact_paths["agg"]) if artifact_paths.get("agg") else ""
+    )
+
     viz_sha = compute_sha256(viz_path) if viz_path and viz_path.exists() else ""
 
     runs_manifest: List[Dict[str, Any]] = []
@@ -1123,6 +1383,10 @@ def build_manifest(
             "path": str(artifact_paths.get("runs_jsonl", "")),
             "sha256": runs_jsonl_sha,
         },
+        "agg": {
+            "path": str(artifact_paths.get("agg", "")),
+            "sha256": agg_sha,
+        },
         "zip": {"path": str(artifact_paths.get("zip", "")), "sha256": zip_sha},
         "viz_overview": {"path": str(viz_path) if viz_path else "", "sha256": viz_sha},
         "overview_payload": overview,
@@ -1166,6 +1430,12 @@ def parse_args():
     sweep.add_argument("--graph-format", type=str, default="")
     sweep.add_argument("--export-graphs", action="store_true")
     sweep.add_argument("--manifest-max-detailed-runs", type=int, default=200)
+    sweep.add_argument("--early-stop", action="store_true")
+    sweep.add_argument("--early-min-runs", type=int, default=200)
+    sweep.add_argument("--early-window", type=int, default=50)
+    sweep.add_argument("--early-eps", type=float, default=0.005)
+    sweep.add_argument("--early-patience", type=int, default=3)
+    sweep.add_argument("--chunk-size", type=int, default=0)
 
     gad = subparsers.add_parser("gad", help="Run GAD-focused sweep")
     gad.add_argument("--runs", type=int, default=100)
@@ -1181,6 +1451,12 @@ def parse_args():
     gad.add_argument("--graph-format", type=str, default="")
     gad.add_argument("--export-graphs", action="store_true")
     gad.add_argument("--manifest-max-detailed-runs", type=int, default=200)
+    gad.add_argument("--early-stop", action="store_true")
+    gad.add_argument("--early-min-runs", type=int, default=200)
+    gad.add_argument("--early-window", type=int, default=50)
+    gad.add_argument("--early-eps", type=float, default=0.005)
+    gad.add_argument("--early-patience", type=int, default=3)
+    gad.add_argument("--chunk-size", type=int, default=0)
 
     subparsers.add_parser("test", help="Run unit tests")
     subparsers.add_parser("bench", help="Run performance benchmarks")

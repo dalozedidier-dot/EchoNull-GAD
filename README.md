@@ -97,3 +97,20 @@ Les comparaisons standard (DOMINANT, CoLA, GCNAE, etc.) et les datasets publics 
 Résultats observés sur 50 runs : l’artefact zip fait environ 1.6 MB (ordre de grandeur). Pour 500 à 1000 runs, le manifest limite automatiquement la partie détaillée et pousse le détail dans `runs.jsonl`.
 
 Voir `docs/SCALING.md`.
+
+## Public benchmark
+
+Run a graph-level benchmark (synthetic by default):
+
+```bash
+python benchmarks/public_benchmark.py --dataset synthetic --variants 300 --anomaly-frac 0.2 --mode silent_nodes --severity 0.9 --out-dir bench_out
+```
+
+If you have `torch_geometric` installed, you can also run:
+
+```bash
+python benchmarks/public_benchmark.py --dataset cora --variants 200 --out-dir bench_out_cora
+```
+
+Outputs: `bench_out/scores.csv` and `bench_out/benchmark_results.json`.
+
